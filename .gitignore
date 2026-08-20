@@ -1,0 +1,10 @@
+.env
+bin/
+tmp/
+*.exe
+*.test
+*.out
+.idea/
+.vscode/
+cover.out
+uploads/

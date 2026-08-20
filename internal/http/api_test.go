@@ -650,22 +650,31 @@ func TestUploadsAndJSONAssets(t *testing.T) {
 
 func TestReviewsPublicAndDeliveredGate(t *testing.T) {
 	h := testAPI(t)
-
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/products?limit=5", nil)
-	listRec := httptest.NewRecorder()
-	h.ServeHTTP(listRec, listReq)
-	if listRec.Code != 200 {
-		t.Fatalf("catalog: %d %s", listRec.Code, listRec.Body.String())
+	suffix := time.Now().UnixNano()
+	sellerEmail := fmt.Sprintf("seller-rev-%d@woason.ru", suffix)
+	regS := postJSON(t, h, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+		"name": "Продавец Отзывов", "email": sellerEmail, "phone": "+79001112233",
+		"password": "123456", "role": "seller", "shopName": "Отзывы", "city": "Казань",
+		"delivery": []string{"cdek"},
+	})
+	if regS.Code != 200 && regS.Code != 201 {
+		t.Fatalf("register seller: %d %s", regS.Code, regS.Body.String())
 	}
-	var catalog struct {
-		Items []struct {
-			ID string `json:"id"`
-		} `json:"items"`
+	seller := login(t, h, sellerEmail, "123456")
+	seedProd := postJSON(t, h, http.MethodPost, "/api/v1/seller/products", seller.AccessToken, map[string]any{
+		"title": "Витрина для отзывов", "price": 500, "category": "dom", "condition": "new",
+		"image": "https://example.com/public-rev.jpg",
+	})
+	if seedProd.Code >= 300 {
+		t.Fatalf("public product: %d %s", seedProd.Code, seedProd.Body.String())
 	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &catalog); err != nil || len(catalog.Items) == 0 {
-		t.Fatalf("need a public product: %s", listRec.Body.String())
+	var seed map[string]any
+	_ = json.Unmarshal(seedProd.Body.Bytes(), &seed)
+	publicID, _ := seed["id"].(string)
+	if publicID == "" {
+		t.Fatalf("need a public product: %s", seedProd.Body.String())
 	}
-	publicID := catalog.Items[0].ID
+	removeProduct(t, h, publicID)
 
 	guestProd := httptest.NewRequest(http.MethodGet, "/api/v1/products/"+publicID, nil)
 	grec := httptest.NewRecorder()
@@ -705,17 +714,7 @@ func TestReviewsPublicAndDeliveredGate(t *testing.T) {
 		t.Fatalf("guest POST: want 401, got %d %s", anon.Code, anon.Body.String())
 	}
 
-	suffix := time.Now().UnixNano()
-	sellerEmail := fmt.Sprintf("seller-rev-%d@woason.ru", suffix)
 	buyerEmail := fmt.Sprintf("buyer-rev-%d@woason.ru", suffix)
-	regS := postJSON(t, h, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
-		"name": "Продавец Отзывов", "email": sellerEmail, "phone": "+79001112233",
-		"password": "123456", "role": "seller", "shopName": "Отзывы", "city": "Казань",
-		"delivery": []string{"cdek"},
-	})
-	if regS.Code != 200 && regS.Code != 201 {
-		t.Fatalf("register seller: %d %s", regS.Code, regS.Body.String())
-	}
 	regB := postJSON(t, h, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
 		"name": "Покупатель Отзывов", "email": buyerEmail, "phone": "+79002223344",
 		"password": "123456", "role": "buyer",
@@ -723,7 +722,6 @@ func TestReviewsPublicAndDeliveredGate(t *testing.T) {
 	if regB.Code != 200 && regB.Code != 201 {
 		t.Fatalf("register buyer: %d %s", regB.Code, regB.Body.String())
 	}
-	seller := login(t, h, sellerEmail, "123456")
 	buyer := login(t, h, buyerEmail, "123456")
 
 	withTok := httptest.NewRequest(http.MethodGet, "/api/v1/products/"+publicID+"/reviews", nil)

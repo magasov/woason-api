@@ -1,6 +1,7 @@
 .env
 bin/
 tmp/
+.deploy/
 *.exe
 *.test
 *.out

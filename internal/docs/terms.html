@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>WOAson API · Условия использования</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink:#16130e; --muted:#5c564c; --line:#d8d2c6; --paper:#f7f4ee; --gold:#b45309; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: Manrope, system-ui, sans-serif; }
+    header { border-bottom: 1px solid var(--line); background: #fbfaf6; }
+    .bar { max-width: 820px; margin: 0 auto; padding: 18px 24px 12px; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+    .mark { width: 36px; height: 36px; border: 1.5px solid var(--ink); display: grid; place-items: center; font-family: "Source Serif 4", Georgia, serif; font-weight: 600; }
+    .brand { display: flex; gap: 12px; align-items: center; }
+    .brand b { font-family: "Source Serif 4", Georgia, serif; font-size: 18px; font-weight: 600; }
+    nav a { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600; margin-left: 16px; }
+    nav a:hover, nav a.active { color: var(--ink); }
+    main { max-width: 820px; margin: 0 auto; padding: 36px 24px 80px; }
+    .doc-head { border: 1px solid var(--line); background: #fff; padding: 28px 32px; margin-bottom: 28px; }
+    .doc-head small { letter-spacing: 0.14em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
+    h1 { font-family: "Source Serif 4", Georgia, serif; font-size: 28px; font-weight: 600; margin: 8px 0 10px; }
+    .doc-head p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    article { font-family: "Source Serif 4", Georgia, serif; font-size: 17px; line-height: 1.65; }
+    h2 { font-size: 18px; margin: 32px 0 10px; letter-spacing: 0.01em; }
+    p, li { color: #2a261f; }
+    ol { padding-left: 22px; }
+    .stamp { margin-top: 40px; font-size: 13px; color: var(--muted); font-family: Manrope, sans-serif; border-top: 1px solid var(--line); padding-top: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand"><div class="mark">W</div><b>WOAson</b></div>
+      <nav>
+        <a href="/docs">Справочник методов</a>
+        <a href="/docs/openapi.yaml">OpenAPI</a>
+        <a class="active" href="/docs/terms">Условия</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <div class="doc-head">
+      <small>Регламент · внутренний документ платформы</small>
+      <h1>Условия использования программного интерфейса WOAson API</h1>
+      <p>Редакция 1.0 · 20 августа 2026 г. · применяется к интерфейсу версии <strong>/api/v1</strong>. Настоящий документ не является публичной офертой в смысле статьи 437 Гражданского кодекса Российской Федерации.</p>
+    </div>
+    <article>
+      <h2>1. Предмет</h2>
+      <p>Настоящие условия определяют порядок доступа к программному интерфейсу платформы электронной торговли WOAson (далее — «API») для клиентских приложений покупателя, продавца и администратора. API предназначен для совершения операций с каталогом физических товаров, заказами, платежами и сообщениями в рамках платформы.</p>
+
+      <h2>2. Доступ и аутентификация</h2>
+      <p>Доступ к защищённым методам предоставляется по JSON Web Token (алгоритм HS256). Access-токен передаётся в заголовке <code>Authorization: Bearer</code>, срок действия — 15 минут. Обновление сессии выполняется refresh-токеном со сроком 7 суток; использованный refresh-токен погашается. Учётные данные, токены и ключи платёжного провайдера запрещено передавать третьим лицам и публиковать в клиентском коде.</p>
+
+      <h2>3. Роли</h2>
+      <p>Регистрация через API допускается только для ролей <code>buyer</code> и <code>seller</code>. Роль <code>admin</code> создаётся оператором платформы и не выдаётся через публичную регистрацию. Методы группы <code>/admin/*</code> доступны исключительно администратору. Методы группы <code>/seller/*</code> — продавцу либо администратору.</p>
+
+      <h2>4. Персональные данные</h2>
+      <p>При использовании API обрабатываются сведения, необходимые для исполнения договора купли-продажи и сопровождения заказа (идентификатор, имя, адрес электронной почты, номер телефона, адрес доставки). Обработка осуществляется в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных». Интегратор обязан обеспечивать сохранность токенов и не запрашивать избыточные данные.</p>
+
+      <h2>5. Каталог и запрещённые категории</h2>
+      <p>Витрина WOAson предназначена только для оборота физических товаров. Категории объявлений классифайда (в том числе автотранспорт, недвижимость, услуги, вакансии, туры) отклоняются API. Продавец несёт ответственность за достоверность описания, цену, наличие товара и законность предложения.</p>
+
+      <h2>6. Платежи</h2>
+      <p>Вебхук ЮKassa: <code>POST https://api.woason.ru/api/v1/payments/yookassa/webhook</code>. JWT клиента не требуется.</p>
+
+      <h2>7. Загрузки</h2>
+      <p>Допускаются только изображения форматов JPEG, PNG, WebP, GIF и AVIF, не более 10 МБ на файл. Файлы принимаются методом <code>POST /api/v1/uploads</code> (multipart). В карточки товаров, отзывы и профиль передаются полученные публичные URL, а не содержимое <code>blob:</code> или <code>data:</code>.</p>
+
+      <h2>8. Ограничение ответственности</h2>
+      <p>API предоставляется «как есть» в пределах работоспособности текущего инстанса. Оператор не гарантирует бесперебойность каналов связи, служб доставки и платёжного провайдера. Расчёт стоимости доставки носит справочный характер до момента оформления заказа.</p>
+
+      <h2>9. Изменение интерфейса</h2>
+      <p>Обратно несовместимые изменения публикуются в рамках новой мажорной версии префикса (<code>/api/v2</code> и далее). Исправления в пределах v1 могут вноситься без предварительного уведомления, если они не меняют контракт успешных ответов.</p>
+
+      <h2>10. Применимое право</h2>
+      <p>К отношениям сторон применяется право Российской Федерации. Споры подлежат рассмотрению в соответствии с законодательством РФ по месту нахождения оператора платформы, если иное не установлено императивными нормами.</p>
+    </article>
+    <p class="stamp">WOAson API v1 · документ сопровождает спецификацию OpenAPI 3.0, размещённую по адресу /docs/openapi.yaml</p>
+  </main>
+</body>
+</html>

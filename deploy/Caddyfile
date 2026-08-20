@@ -1,0 +1,25 @@
+{
+	email 77aushev@mail.ru
+}
+
+api.woason.ru {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	reverse_proxy api:8080
+}
+
+woason.ru {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	root * /srv/frontend
+	try_files {path} /index.html
+	file_server
+}

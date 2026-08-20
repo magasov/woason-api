@@ -1,0 +1,58 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: woason
+          POSTGRES_PASSWORD: woason
+          POSTGRES_DB: woason
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U woason -d woason"
+          --health-interval 4s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Test
+        env:
+          DATABASE_URL: postgres://woason:woason@localhost:5432/woason?sslmode=disable
+          JWT_SECRET: ci-jwt-secret
+          PAYMENTS_MOCK: "true"
+          ADMIN_EMAIL: admin@woason.ru
+          ADMIN_PASSWORD: "123456"
+        run: go test ./... -count=1
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and restart on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/woason/api
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose -f docker-compose.prod.yml --env-file /opt/woason/api/.env up -d --build
+            docker compose -f docker-compose.prod.yml ps

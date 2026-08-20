@@ -12,6 +12,7 @@ import (
 	"woason-api/internal/chat"
 	"woason-api/internal/config"
 	"woason-api/internal/delivery"
+	"woason-api/internal/docs"
 	"woason-api/internal/httpx"
 	"woason-api/internal/models"
 	"woason-api/internal/order"
@@ -44,6 +45,8 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(CORS(d.Config.FrontendURL))
+
+	docs.Register(r)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})

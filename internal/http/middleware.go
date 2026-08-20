@@ -15,6 +15,8 @@ func CORS(frontendURL string) func(http.Handler) http.Handler {
 		frontendURL:             {},
 		"http://localhost:3000": {},
 		"http://127.0.0.1:3000": {},
+		"https://woason.ru":     {},
+		"https://www.woason.ru": {},
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

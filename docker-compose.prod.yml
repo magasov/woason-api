@@ -1,0 +1,64 @@
+# Production: Caddy (80/443) + API + Postgres. Frontend files live in deploy/frontend.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: woason
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: woason
+    volumes:
+      - woason_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U woason -d woason"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://woason:${POSTGRES_PASSWORD}@postgres:5432/woason?sslmode=disable
+      MIGRATIONS_PATH: /app/migrations
+      UPLOAD_DIR: /app/uploads
+      HTTP_ADDR: :8080
+      FRONTEND_URL: https://woason.ru
+      PUBLIC_BASE_URL: https://api.woason.ru
+      YKASSA_RETURN_URL: https://woason.ru/orders
+    volumes:
+      - woason_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/frontend:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  woason_pg:
+  woason_uploads:
+  caddy_data:
+  caddy_config:

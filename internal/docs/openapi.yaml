@@ -1,0 +1,1910 @@
+openapi: 3.0.3
+info:
+  title: WOAson API
+  version: 1.0.0
+  termsOfService: /docs/terms
+  contact:
+    name: WOAson Platform
+    url: https://woason.ru
+  license:
+    name: Proprietary. All rights reserved.
+  x-logo:
+    altText: WOAson
+  description: |
+    Программный интерфейс платформы электронной торговли **WOAson** (ВОАЗОН).
+
+    Документ описывает контракт версии **v1**. Не является публичной офертой (ст. 437 ГК РФ).
+    Обработка персональных данных — Федеральный закон № 152-ФЗ.
+
+    ## Аутентификация
+    Access JWT (HS256), срок **15 минут**. Заголовок:
+
+    `Authorization: Bearer <accessToken>`
+
+    Refresh-токен живёт **7 суток** и одноразовый: каждый вызов `/auth/refresh` выдаёт новую пару.
+
+    | Роль | Регистрация | Доступ |
+    | --- | --- | --- |
+    | `buyer` | да | витрина, корзина, заказы, чат |
+    | `seller` | да (+ магазин) | кабинет продавца |
+    | `admin` | нет, только оператор | `/admin/*` |
+
+    ## Соглашения
+    - Префикс REST: `/api/v1`
+    - Цены, суммы заказов и доставки в JSON — **рубли**, целое число
+    - Списки: `{ "items": [], "total": 0 }`
+    - Ошибки: `{ "error": "текст" }`
+    - Пагинация: `limit` (по умолчанию 24, максимум 100), `offset`
+    - `tradeType=dropship` во внешних витринах маскируется как `retail`
+
+    ## Доставка
+    `cdek` · `pochta` · `pickup`
+
+    ## Категории
+    Только физические товары (22 slug). Классифайд (`avto`, `nedvizhimost`, `uslugi`, `rabota`, `travel`, `transport`) отклоняется.
+
+servers:
+  - url: https://api.woason.ru
+    description: Production
+  - url: /
+    description: Текущий инстанс (локальный запуск)
+
+tags:
+  - name: Служебные
+  - name: Авторизация
+  - name: Каталог
+  - name: Магазины
+  - name: Профиль
+  - name: Загрузки
+  - name: Корзина
+  - name: Избранное
+  - name: Заказы
+  - name: Отзывы
+  - name: Рилсы
+  - name: Чаты
+  - name: Продавец
+  - name: Администрирование
+  - name: Платежи
+  - name: Доставка
+  - name: WebSocket
+
+x-tagGroups:
+  - name: Доступ
+    tags: [Служебные, Авторизация, Профиль, Загрузки, WebSocket]
+  - name: Витрина
+    tags: [Каталог, Магазины, Рилсы, Доставка]
+  - name: Покупатель
+    tags: [Корзина, Избранное, Заказы, Отзывы, Чаты]
+  - name: Кабинеты
+    tags: [Продавец, Администрирование, Платежи]
+
+security:
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Служебные]
+      security: []
+      summary: Проверка живости
+      operationId: health
+      responses:
+        "200":
+          description: Сервис доступен
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+
+  /ws:
+    get:
+      tags: [WebSocket]
+      summary: Канал реального времени
+      description: |
+        Upgrade до WebSocket. Access-токен — query `token`.
+
+        Входящие сообщения:
+        - `{ "type":"subscribe", "channel":"chat", "peerId":"<id>" }`
+        - `{ "type":"chat.send", "peerId":"<id>", "text":"…" }`
+        - `{ "type":"chat.typing", "peerId":"<id>" }`
+
+        Исходящие: `chat.message`, `chat.typing`, `order.updated`, `payment.succeeded`, `error`.
+      security: []
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema: { type: string }
+          description: Access JWT
+      responses:
+        "101": { description: Switching Protocols }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/register:
+    post:
+      tags: [Авторизация]
+      security: []
+      summary: Регистрация покупателя или продавца
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/TokenPair" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/login:
+    post:
+      tags: [Авторизация]
+      security: []
+      summary: Вход
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200": { $ref: "#/components/responses/TokenPair" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Авторизация]
+      security: []
+      summary: Выход (отзыв refresh)
+      operationId: logout
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Авторизация]
+      security: []
+      summary: Обновление пары токенов
+      operationId: refresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/TokenPair" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/me:
+    get:
+      tags: [Профиль]
+      summary: Текущий пользователь
+      operationId: me
+      responses:
+        "200":
+          description: Профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [Профиль]
+      summary: Изменить имя, телефон, аватар
+      operationId: patchMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                phone: { type: string }
+                avatar: { type: string, description: Публичный URL после /uploads }
+      responses:
+        "200":
+          description: Обновлённый профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/uploads:
+    post:
+      tags: [Загрузки]
+      summary: Загрузка изображений
+      description: |
+        `multipart/form-data`: поле `kind` и файлы в `files`.
+        `kind`: `product` | `avatar` | `banner` | `story` | `review`.
+        Для `review` — не более 4 файлов, иначе до 12. Максимум 10 МБ. JPEG, PNG, WebP, GIF, AVIF.
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [kind, files]
+              properties:
+                kind:
+                  type: string
+                  enum: [product, avatar, banner, story, review]
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        "200":
+          description: Публичные URL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/categories:
+    get:
+      tags: [Каталог]
+      security: []
+      summary: Справочник товарных категорий
+      operationId: categories
+      responses:
+        "200":
+          description: 22 категории физических товаров
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Category" }
+
+  /api/v1/products:
+    get:
+      tags: [Каталог]
+      security: []
+      summary: Витрина товаров
+      description: Нетоварные категории возвращают пустой список. JWT необязателен.
+      operationId: listProducts
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: condition
+          schema: { type: string, enum: [new, used, all] }
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Поиск по названию и описанию
+        - in: query
+          name: city
+          schema: { type: string }
+        - in: query
+          name: sort
+          schema: { type: string, enum: [new, price, price_asc, price_desc, rating] }
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /api/v1/products/{id}:
+    get:
+      tags: [Каталог]
+      security: []
+      summary: Карточка товара
+      operationId: getProduct
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Товар
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/products/{id}/reviews:
+    get:
+      tags: [Отзывы]
+      security: []
+      summary: Отзывы товара
+      operationId: productReviews
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/Limit50"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: sort
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/ReviewList" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [Отзывы]
+      summary: Оставить отзыв после получения заказа
+      operationId: createReview
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReviewRequest" }
+      responses:
+        "201":
+          description: Создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Review" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /api/v1/reels:
+    get:
+      tags: [Рилсы]
+      security: []
+      summary: Лента рилсов
+      operationId: listReels
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/ReelList" }
+
+  /api/v1/reels/{id}:
+    get:
+      tags: [Рилсы]
+      security: []
+      summary: Рилс
+      operationId: getReel
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Рилс
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reel" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/reels/{id}/like:
+    post:
+      tags: [Рилсы]
+      summary: Лайк / снять лайк
+      operationId: likeReel
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Рилс с актуальным счётчиком
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reel" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/reels/{id}/comments:
+    post:
+      tags: [Рилсы]
+      summary: Комментарий к рилсу
+      operationId: commentReel
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+      responses:
+        "201":
+          description: Комментарий
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReelComment" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/shops/{id}:
+    get:
+      tags: [Магазины]
+      security: []
+      summary: Публичная витрина магазина
+      operationId: getShop
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Магазин
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shop" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/shops/{id}/products:
+    get:
+      tags: [Магазины]
+      security: []
+      summary: Товары магазина
+      operationId: shopProducts
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: sort
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/shops/{id}/reels:
+    get:
+      tags: [Магазины]
+      security: []
+      summary: Рилсы магазина
+      operationId: shopReels
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/ReelList" }
+
+  /api/v1/shops/{id}/stories:
+    get:
+      tags: [Магазины]
+      security: []
+      summary: Сторис магазина
+      operationId: shopStories
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Список сторис
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Story" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/delivery/quote:
+    get:
+      tags: [Доставка]
+      security: []
+      summary: Расчёт стоимости доставки
+      description: Справочная оценка до оформления заказа.
+      operationId: deliveryQuote
+      parameters:
+        - in: query
+          name: method
+          required: true
+          schema: { $ref: "#/components/schemas/DeliveryMethod" }
+        - in: query
+          name: city
+          schema: { type: string, example: Москва }
+        - in: query
+          name: weightKg
+          schema: { type: number, format: double }
+      responses:
+        "200":
+          description: Оценка
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeliveryQuote" }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /api/v1/cart:
+    get:
+      tags: [Корзина]
+      summary: Содержимое корзины
+      operationId: getCart
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [Корзина]
+      summary: Добавить товар
+      operationId: addCart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId]
+              properties:
+                productId: { type: string }
+                qty: { type: integer, default: 1 }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [Корзина]
+      summary: Заменить корзину целиком
+      operationId: putCart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items: { $ref: "#/components/schemas/CartItemIn" }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [Корзина]
+      summary: Очистить корзину
+      operationId: clearCart
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/cart/{productId}:
+    patch:
+      tags: [Корзина]
+      summary: Изменить количество
+      operationId: patchCartItem
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [qty]
+              properties:
+                qty: { type: integer, minimum: 0 }
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "401": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [Корзина]
+      summary: Удалить позицию
+      operationId: deleteCartItem
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200": { $ref: "#/components/responses/Cart" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/favorites:
+    get:
+      tags: [Избранное]
+      summary: Список избранного
+      operationId: favorites
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [Избранное]
+      summary: Добавить в избранное
+      operationId: addFavorite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId]
+              properties:
+                productId: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/favorites/{productId}:
+    delete:
+      tags: [Избранное]
+      summary: Убрать из избранного
+      operationId: deleteFavorite
+      parameters:
+        - $ref: "#/components/parameters/ProductID"
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/checkout:
+    post:
+      tags: [Заказы]
+      summary: Оформить заказ из корзины
+      description: |
+        Корзина должна содержать товары одного продавца.
+        Ответ 201: `order` и `confirmationUrl` (страница ЮKassa).
+        При `PAYMENTS_MOCK=true` заказ сразу переходит в `awaiting_shipment`.
+      operationId: checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delivery]
+              properties:
+                address: { type: string }
+                city: { type: string, example: Москва }
+                delivery: { $ref: "#/components/schemas/DeliveryMethod" }
+      responses:
+        "201":
+          description: Заказ создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckoutResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /api/v1/orders/{id}:
+    get:
+      tags: [Заказы]
+      summary: Заказ (покупатель, продавец или администратор)
+      operationId: getOrder
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Заказ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/cabinet/dashboard:
+    get:
+      tags: [Заказы]
+      summary: Сводка кабинета покупателя
+      operationId: cabinetDashboard
+      responses:
+        "200":
+          description: Дашборд
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuyerDashboard" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/cabinet/orders:
+    get:
+      tags: [Заказы]
+      summary: Заказы покупателя
+      operationId: cabinetOrders
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/OrderList" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/cabinet/reviews:
+    get:
+      tags: [Отзывы]
+      summary: Отзывы покупателя
+      operationId: cabinetReviews
+      parameters:
+        - $ref: "#/components/parameters/Limit50"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/ReviewList" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/cabinet/reviews/pending:
+    get:
+      tags: [Отзывы]
+      summary: Ожидают отзыва (доставленные без отзыва)
+      operationId: cabinetPendingReviews
+      parameters:
+        - $ref: "#/components/parameters/Limit50"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/PendingReview" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/chats:
+    get:
+      tags: [Чаты]
+      summary: Диалоги текущего пользователя
+      operationId: listChats
+      responses:
+        "200":
+          description: Треды
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/ChatThread" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/chats/{peerId}/messages:
+    get:
+      tags: [Чаты]
+      summary: История с собеседником
+      operationId: chatMessages
+      parameters:
+        - $ref: "#/components/parameters/PeerID"
+      responses:
+        "200":
+          description: Сообщения
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/ChatMessage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [Чаты]
+      summary: Отправить сообщение
+      operationId: sendChat
+      parameters:
+        - $ref: "#/components/parameters/PeerID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+      responses:
+        "201":
+          description: Сообщение
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatMessage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/chats/{peerId}/read:
+    post:
+      tags: [Чаты]
+      summary: Пометить прочитанным
+      operationId: readChat
+      parameters:
+        - $ref: "#/components/parameters/PeerID"
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/dashboard:
+    get:
+      tags: [Продавец]
+      summary: Сводка магазина
+      operationId: sellerDashboard
+      responses:
+        "200":
+          description: Показатели и объект shop
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SellerDashboard" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/shop:
+    patch:
+      tags: [Продавец]
+      summary: Реквизиты магазина
+      operationId: patchSellerShop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchShopRequest" }
+      responses:
+        "200":
+          description: Магазин
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shop" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/products:
+    get:
+      tags: [Продавец]
+      summary: Товары своего магазина (включая скрытые)
+      operationId: sellerProducts
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [Продавец]
+      summary: Создать товар
+      description: Фото — публичные URL после `/uploads` (kind=product). Цена в рублях, больше 0.
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateProductRequest" }
+      responses:
+        "201":
+          description: Товар
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/stories:
+    post:
+      tags: [Продавец]
+      summary: Опубликовать сторис
+      operationId: createStory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string }
+                caption: { type: string }
+      responses:
+        "201":
+          description: Сторис
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Story" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/reels:
+    post:
+      tags: [Продавец]
+      summary: Добавить рилс к своему товару
+      operationId: createReel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, title]
+              properties:
+                productId: { type: string }
+                title: { type: string }
+                caption: { type: string }
+      responses:
+        "201":
+          description: Рилс
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reel" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/orders:
+    get:
+      tags: [Продавец]
+      summary: Заказы магазина
+      operationId: sellerOrders
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/OrderList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/reviews:
+    get:
+      tags: [Продавец]
+      summary: Отзывы на товары магазина
+      operationId: sellerReviews
+      parameters:
+        - $ref: "#/components/parameters/Limit50"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/ReviewList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/reviews/{reviewId}/reply:
+    post:
+      tags: [Продавец]
+      summary: Ответ продавца на отзыв
+      operationId: replyReview
+      parameters:
+        - in: path
+          name: reviewId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, minLength: 2, maxLength: 1000 }
+      responses:
+        "200":
+          description: Отзыв с ответом
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Review" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/orders/{id}/label:
+    post:
+      tags: [Продавец]
+      summary: Печать этикетки / трек-номер
+      operationId: printLabel
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { $ref: "#/components/schemas/DeliveryMethod" }
+      responses:
+        "200":
+          description: Заказ со статусом label_printed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/seller/orders/{id}/status:
+    post:
+      tags: [Продавец]
+      summary: Сменить статус заказа
+      description: Допустимо `awaiting_shipment`, `label_printed`, `in_transit`, `delivered`, `cancelled`.
+      operationId: sellerOrderStatus
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: "#/components/schemas/OrderStatus" }
+      responses:
+        "200":
+          description: Заказ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/payments/yookassa/webhook:
+    post:
+      tags: [Платежи]
+      security: []
+      summary: Вебхук ЮKassa
+      description: Только для уведомлений платёжного провайдера. JWT клиента не используется.
+      operationId: yookassaWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/YookassaWebhook" }
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/stats:
+    get:
+      tags: [Администрирование]
+      summary: Сводная статистика
+      operationId: adminStats
+      responses:
+        "200":
+          description: Счётчики площадки
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminStats" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/users:
+    get:
+      tags: [Администрирование]
+      summary: Пользователи
+      operationId: adminUsers
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: role
+          schema: { $ref: "#/components/schemas/Role" }
+        - in: query
+          name: banned
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200": { $ref: "#/components/responses/UserList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/users/{id}:
+    patch:
+      tags: [Администрирование]
+      summary: Блок, роль, имя, телефон
+      operationId: adminPatchUser
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                banned: { type: boolean }
+                role: { $ref: "#/components/schemas/Role" }
+                name: { type: string }
+                phone: { type: string }
+      responses:
+        "200":
+          description: Пользователь
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/shops:
+    get:
+      tags: [Администрирование]
+      summary: Магазины
+      operationId: adminShops
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Shop" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/shops/{id}:
+    patch:
+      tags: [Администрирование]
+      summary: Скрыть магазин / править название
+      operationId: adminPatchShop
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hidden: { type: boolean }
+                shopName: { type: string }
+                description: { type: string }
+      responses:
+        "200":
+          description: Магазин
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shop" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/products:
+    get:
+      tags: [Администрирование]
+      summary: Все товары, включая скрытые
+      operationId: adminProducts
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/ProductList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/products/{id}:
+    patch:
+      tags: [Администрирование]
+      summary: Скрыть товар / цена / название
+      operationId: adminPatchProduct
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hidden: { type: boolean }
+                price: { type: integer, minimum: 1 }
+                title: { type: string }
+      responses:
+        "200":
+          description: Товар
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [Администрирование]
+      summary: Удалить товар
+      operationId: adminDeleteProduct
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/orders:
+    get:
+      tags: [Администрирование]
+      summary: Все заказы
+      operationId: adminOrders
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200": { $ref: "#/components/responses/OrderList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/orders/{id}:
+    patch:
+      tags: [Администрирование]
+      summary: Статус и трек заказа
+      operationId: adminPatchOrder
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { $ref: "#/components/schemas/OrderStatus" }
+                trackNumber: { type: string }
+      responses:
+        "200":
+          description: Заказ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/payments:
+    get:
+      tags: [Администрирование]
+      summary: Платежи
+      operationId: adminPayments
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Payment" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/payments/{id}/refund:
+    post:
+      tags: [Администрирование]
+      summary: Возврат succeeded-платежа
+      operationId: adminRefund
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Платёж в статусе canceled, заказ refunded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/chats:
+    get:
+      tags: [Администрирование]
+      summary: Все диалоги
+      operationId: adminChats
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Треды
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/ChatThread" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/chats/{threadId}/messages:
+    get:
+      tags: [Администрирование]
+      summary: Сообщения треда (включая скрытые)
+      operationId: adminChatMessages
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Сообщения
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/ChatMessage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/admin/chats/messages/{id}/hide:
+    post:
+      tags: [Администрирование]
+      summary: Скрыть сообщение модерацией
+      operationId: adminHideMessage
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен из /auth/login или /auth/refresh. Срок 15 минут.
+
+  parameters:
+    ID:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    ProductID:
+      in: path
+      name: productId
+      required: true
+      schema: { type: string }
+    PeerID:
+      in: path
+      name: peerId
+      required: true
+      schema: { type: string }
+      description: Идентификатор собеседника (магазин или покупатель)
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, default: 24, minimum: 1, maximum: 100 }
+    Limit50:
+      in: query
+      name: limit
+      schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+    Offset:
+      in: query
+      name: offset
+      schema: { type: integer, default: 0, minimum: 0 }
+
+  responses:
+    Error:
+      description: Ошибка
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    OK:
+      description: Операция выполнена
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok: { type: string, example: "true" }
+    TokenPair:
+      description: Сессия
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TokenPair" }
+    ProductList:
+      description: Список товаров
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ListMeta"
+              - type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Product" }
+    ReviewList:
+      description: Список отзывов
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ListMeta"
+              - type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Review" }
+    ReelList:
+      description: Список рилсов
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ListMeta"
+              - type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Reel" }
+    OrderList:
+      description: Список заказов
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ListMeta"
+              - type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Order" }
+    UserList:
+      description: Список пользователей
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ListMeta"
+              - type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+    Cart:
+      description: Корзина
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ListMeta"
+              - type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CartItem" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    ListMeta:
+      type: object
+      properties:
+        total: { type: integer }
+    Role:
+      type: string
+      enum: [buyer, seller, admin]
+    DeliveryMethod:
+      type: string
+      enum: [cdek, pochta, pickup]
+    OrderStatus:
+      type: string
+      enum:
+        - placed
+        - awaiting_payment
+        - paid
+        - awaiting_shipment
+        - label_printed
+        - in_transit
+        - delivered
+        - cancelled
+        - refunded
+    TradeType:
+      type: string
+      enum: [retail, wholesale, dropship]
+    RegisterRequest:
+      type: object
+      required: [name, email, phone, password, role]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, example: "+79001112233" }
+        password: { type: string, format: password, minLength: 4 }
+        role: { type: string, enum: [buyer, seller] }
+        shopName: { type: string }
+        shopDescription: { type: string }
+        city: { type: string }
+        delivery:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryMethod" }
+    RefreshRequest:
+      type: object
+      properties:
+        refreshToken: { type: string }
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, user]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        user: { $ref: "#/components/schemas/User" }
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        avatar: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        bannedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        seller: { $ref: "#/components/schemas/Shop" }
+    Shop:
+      type: object
+      properties:
+        id: { type: string }
+        shopName: { type: string }
+        description: { type: string }
+        logo: { type: string }
+        banner: { type: string }
+        city: { type: string }
+        phone: { type: string }
+        kind: { type: string, enum: [shop, private] }
+        delivery:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryMethod" }
+        hidden: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    Category:
+      type: object
+      properties:
+        slug: { type: string, example: odezhda }
+        name: { type: string, example: Одежда }
+        icon: { type: string }
+        group: { type: string, example: Мода }
+    Product:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        price: { type: integer, description: Рубли }
+        oldPrice: { type: integer, nullable: true }
+        rating: { type: number, format: double }
+        reviewsCount: { type: integer }
+        reviews:
+          type: array
+          items: { $ref: "#/components/schemas/Review" }
+        sellerKind: { type: string, enum: [shop, private] }
+        condition: { type: string, enum: [new, used] }
+        category: { type: string }
+        image: { type: string }
+        images:
+          type: array
+          items: { type: string }
+        sellerId: { type: string }
+        sellerName: { type: string }
+        city: { type: string }
+        weightKg: { type: number, format: double }
+        inStock: { type: integer }
+        delivery:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryMethod" }
+        tags:
+          type: array
+          items: { type: string }
+        tradeType: { $ref: "#/components/schemas/TradeType" }
+        hidden: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    CreateProductRequest:
+      type: object
+      required: [title, price, category, image]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        price: { type: integer, minimum: 1 }
+        oldPrice: { type: integer }
+        condition: { type: string, enum: [new, used] }
+        category: { type: string }
+        image: { type: string }
+        images:
+          type: array
+          items: { type: string }
+          maxItems: 12
+        city: { type: string }
+        weightKg: { type: number, format: double }
+        inStock: { type: integer }
+        delivery:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryMethod" }
+        tags:
+          type: array
+          items: { type: string }
+        tradeType: { $ref: "#/components/schemas/TradeType" }
+    Review:
+      type: object
+      properties:
+        id: { type: string }
+        productId: { type: string }
+        orderId: { type: string }
+        userId: { type: string }
+        author: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        text: { type: string }
+        date: { type: string }
+        photos:
+          type: array
+          items: { type: string }
+        productTitle: { type: string }
+        productImage: { type: string }
+        sellerReply: { type: string }
+        sellerReplyAt: { type: string }
+    CreateReviewRequest:
+      type: object
+      required: [orderId, rating, text]
+      properties:
+        orderId: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        text: { type: string, minLength: 8, maxLength: 2000 }
+        photos:
+          type: array
+          items: { type: string }
+          maxItems: 4
+    PendingReview:
+      type: object
+      properties:
+        orderId: { type: string }
+        productId: { type: string }
+        title: { type: string }
+        price: { type: integer }
+        image: { type: string }
+        deliveredAt: { type: string }
+    Reel:
+      type: object
+      properties:
+        id: { type: string }
+        productId: { type: string }
+        sellerId: { type: string }
+        sellerName: { type: string }
+        title: { type: string }
+        caption: { type: string }
+        likes: { type: integer }
+        comments:
+          type: array
+          items: { $ref: "#/components/schemas/ReelComment" }
+        durationSec: { type: integer }
+        gradient:
+          type: array
+          items: { type: string }
+        liked: { type: boolean }
+    ReelComment:
+      type: object
+      properties:
+        id: { type: string }
+        author: { type: string }
+        text: { type: string }
+        createdAt: { type: string }
+    Story:
+      type: object
+      properties:
+        id: { type: string }
+        sellerId: { type: string }
+        image: { type: string }
+        caption: { type: string }
+        createdAt: { type: string }
+    CartItemIn:
+      type: object
+      properties:
+        productId: { type: string }
+        qty: { type: integer }
+    CartItem:
+      type: object
+      properties:
+        productId: { type: string }
+        qty: { type: integer }
+        product: { $ref: "#/components/schemas/Product" }
+    OrderItem:
+      type: object
+      properties:
+        productId: { type: string }
+        title: { type: string }
+        price: { type: integer }
+        qty: { type: integer }
+        image: { type: string }
+    Order:
+      type: object
+      properties:
+        id: { type: string }
+        createdAt: { type: string, format: date-time }
+        buyerId: { type: string }
+        sellerId: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderItem" }
+        city: { type: string }
+        address: { type: string }
+        delivery: { $ref: "#/components/schemas/DeliveryMethod" }
+        deliveryPrice: { type: integer }
+        eta: { type: string }
+        trackNumber: { type: string }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        total: { type: integer, description: Рубли, товары + доставка }
+    CheckoutResult:
+      type: object
+      properties:
+        order: { $ref: "#/components/schemas/Order" }
+        confirmationUrl: { type: string }
+        confirmationURL: { type: string }
+    Payment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string }
+        amount: { type: integer }
+        status:
+          type: string
+          enum: [pending, waiting_for_capture, succeeded, canceled]
+        confirmationUrl: { type: string }
+    YookassaWebhook:
+      type: object
+      properties:
+        event: { type: string, example: payment.succeeded }
+        object:
+          type: object
+          additionalProperties: true
+    DeliveryQuote:
+      type: object
+      properties:
+        price: { type: integer }
+        eta: { type: string }
+        days: { type: string }
+    UploadResult:
+      type: object
+      properties:
+        urls:
+          type: array
+          items: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              url: { type: string }
+              filename: { type: string }
+    ChatThread:
+      type: object
+      properties:
+        id: { type: string }
+        sellerId: { type: string }
+        buyerId: { type: string }
+        peerId: { type: string }
+        peerName: { type: string }
+        lastText: { type: string }
+        lastAt: { type: string, format: date-time }
+        unread: { type: integer }
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string }
+        threadId: { type: string }
+        sellerId: { type: string }
+        buyerId: { type: string }
+        fromId: { type: string }
+        text: { type: string }
+        createdAt: { type: string, format: date-time }
+        read: { type: boolean }
+        hidden: { type: boolean }
+    BuyerDashboard:
+      type: object
+      properties:
+        favoritesCount: { type: integer }
+        cartCount: { type: integer }
+        ordersCount: { type: integer }
+        spent: { type: integer }
+        inTransit: { type: integer }
+        waitingReviews: { type: integer }
+        week:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              sum: { type: integer }
+    SellerDashboard:
+      type: object
+      properties:
+        productsCount: { type: integer }
+        ordersCount: { type: integer }
+        newOrders: { type: integer }
+        inTransit: { type: integer }
+        turnover: { type: integer }
+        deliveredSum: { type: integer }
+        shop: { $ref: "#/components/schemas/Shop" }
+    PatchShopRequest:
+      type: object
+      properties:
+        shopName: { type: string }
+        description: { type: string }
+        logo: { type: string }
+        banner: { type: string }
+        city: { type: string }
+        phone: { type: string }
+        delivery:
+          type: array
+          items: { $ref: "#/components/schemas/DeliveryMethod" }
+    AdminStats:
+      type: object
+      properties:
+        users: { type: integer }
+        sellers: { type: integer }
+        buyers: { type: integer }
+        admins: { type: integer }
+        banned: { type: integer }
+        shops: { type: integer }
+        hiddenShops: { type: integer }
+        products: { type: integer }
+        hiddenProducts: { type: integer }
+        orders: { type: integer }
+        payments: { type: integer }
+        gmv: { type: integer }
+        chats: { type: integer }

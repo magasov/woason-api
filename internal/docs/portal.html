@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>WOAson API · Справочник программного интерфейса v1</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #0c1118;
+      --paper: #f4f1ea;
+      --line: #d8d2c6;
+      --muted: #5c564c;
+      --accent: #9a3412;
+      --gold: #b45309;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); }
+    body { font-family: Manrope, system-ui, sans-serif; display: flex; flex-direction: column; }
+    header {
+      flex: 0 0 auto;
+      border-bottom: 1px solid var(--line);
+      background: #fbfaf6;
+    }
+    .bar {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 18px 28px 14px;
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .brand { display: flex; gap: 14px; align-items: center; }
+    .mark {
+      width: 40px; height: 40px;
+      border: 1.5px solid var(--ink);
+      display: grid; place-items: center;
+      font-family: "Source Serif 4", Georgia, serif;
+      font-weight: 600;
+      font-size: 18px;
+      letter-spacing: 0.02em;
+    }
+    .titles small {
+      display: block;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .titles h1 {
+      margin: 0;
+      font-family: "Source Serif 4", Georgia, serif;
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .meta {
+      text-align: right;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .meta strong { color: var(--ink); font-weight: 600; }
+    nav {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 28px;
+      display: flex;
+      gap: 4px;
+    }
+    nav a {
+      display: inline-block;
+      padding: 10px 14px 12px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      border-bottom: 2px solid transparent;
+    }
+    nav a:hover { color: var(--ink); }
+    nav a.active { color: var(--ink); border-bottom-color: var(--gold); }
+    .notice {
+      border-top: 1px solid var(--line);
+      background: #efe8d8;
+      color: #3f3a32;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+    .notice div {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 10px 28px;
+    }
+    .notice em { font-style: normal; font-weight: 650; }
+    #app { flex: 1 1 auto; min-height: 0; background: #fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand">
+        <div class="mark">W</div>
+        <div class="titles">
+          <small>Платформа электронной торговли</small>
+          <h1>WOAson API Reference</h1>
+        </div>
+      </div>
+      <div class="meta">
+        <div><strong>Версия спецификации</strong> 1.0.0</div>
+        <div>Редакция от 20 августа 2026 г.</div>
+        <div>Префикс: <strong>/api/v1</strong></div>
+      </div>
+    </div>
+    <nav>
+      <a class="active" href="/docs">Справочник методов</a>
+      <a href="/docs/openapi.yaml">Спецификация OpenAPI 3.0</a>
+      <a href="/docs/terms">Условия использования API</a>
+    </nav>
+    <div class="notice">
+      <div>
+        Документация предназначена исключительно для уполномоченных интеграторов платформы WOAson.
+        <em>Не является публичной офертой</em> (ст. 437 ГК РФ). Обращение персональных данных — в соответствии с Федеральным законом № 152-ФЗ.
+      </div>
+    </div>
+  </header>
+  <div id="app">
+    <script id="api-reference" data-url="/docs/openapi.yaml" data-configuration='{"theme":"default","layout":"modern","hideDarkModeToggle":true,"persistAuth":true}'></script>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>

@@ -25,7 +25,7 @@ services:
       DATABASE_URL: postgres://woason:woason@postgres:5432/woason?sslmode=disable
       MIGRATIONS_PATH: /app/migrations
       UPLOAD_DIR: /app/uploads
-      PUBLIC_BASE_URL: http://localhost:8080
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
     volumes:
       - woason_uploads:/app/uploads
     depends_on:

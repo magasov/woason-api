@@ -112,6 +112,40 @@ func removeProduct(t *testing.T, h http.Handler, productID string) {
 	})
 }
 
+func TestDocsPortal(t *testing.T) {
+	h := api.NewRouter(api.Deps{
+		Tokens: auth.NewTokens("test-secret"),
+		Hub:    ws.NewHub(),
+		Store:  &store.Store{},
+		Config: config.Config{FrontendURL: "http://localhost:3000"},
+	})
+	cases := map[string]string{
+		"/docs":              "WOAson API Reference",
+		"/docs/":             "Справочник методов",
+		"/docs/terms":        "Условия использования",
+		"/docs/openapi.yaml": "openapi: 3.0.3",
+	}
+	for path, want := range cases {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s: want 200, got %d %s", path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("%s: missing %q", path, want)
+		}
+	}
+	spec := httptest.NewRequest(http.MethodGet, "/docs/openapi.yaml", nil)
+	srec := httptest.NewRecorder()
+	h.ServeHTTP(srec, spec)
+	for _, fragment := range []string{"/api/v1/auth/login", "/api/v1/checkout", "/api/v1/admin/stats", "BearerAuth"} {
+		if !strings.Contains(srec.Body.String(), fragment) {
+			t.Fatalf("openapi missing %s", fragment)
+		}
+	}
+}
+
 func TestCategoriesGoodsOnly(t *testing.T) {
 	h := api.NewRouter(api.Deps{
 		Tokens: auth.NewTokens("test-secret"),
@@ -264,12 +298,12 @@ func TestProductsFilterSearchAndDashboard(t *testing.T) {
 	}
 
 	email := fmt.Sprintf("buyer-dash-%d@woason.ru", time.Now().UnixNano())
-	reg := postJSON(t, h, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
+	buyerReg := postJSON(t, h, http.MethodPost, "/api/v1/auth/register", "", map[string]any{
 		"name": "Покупатель", "email": email, "phone": "+79002223344",
 		"password": "123456", "role": "buyer",
 	})
-	if reg.Code != 200 && reg.Code != 201 {
-		t.Fatalf("register buyer: %d %s", reg.Code, reg.Body.String())
+	if buyerReg.Code != 200 && buyerReg.Code != 201 {
+		t.Fatalf("register buyer: %d %s", buyerReg.Code, buyerReg.Body.String())
 	}
 	buyer := login(t, h, email, "123456")
 	dash := httptest.NewRequest(http.MethodGet, "/api/v1/cabinet/dashboard", nil)

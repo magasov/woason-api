@@ -19,7 +19,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 45m
           envs: GIALGIAY_DEPLOY_KEY
-          script_stop: true
           script: |
             set -euo pipefail
             REPO_DIR=/opt/gialgiay
@@ -91,20 +90,9 @@ jobs:
               exit 1
             fi
 
-            tmp_env="$(mktemp)"
-            awk -v pw="$POSTGRES_PASSWORD" '
-              BEGIN { done = 0 }
-              /^DATABASE_URL=/ {
-                print "DATABASE_URL=postgresql://gialgiay:" pw "@postgres:5432/gialgiay?schema=public"
-                done = 1
-                next
-              }
-              { print }
-              END {
-                if (!done) print "DATABASE_URL=postgresql://gialgiay:" pw "@postgres:5432/gialgiay?schema=public"
-              }
-            ' .env > "$tmp_env"
-            mv "$tmp_env" .env
+            grep -v '^DATABASE_URL=' .env > .env.tmp || true
+            printf 'DATABASE_URL=postgresql://gialgiay:%s@postgres:5432/gialgiay?schema=public\n' "$POSTGRES_PASSWORD" >> .env.tmp
+            mv .env.tmp .env
             set -a
             # shellcheck disable=SC1091
             . "${REPO_DIR}/.env"

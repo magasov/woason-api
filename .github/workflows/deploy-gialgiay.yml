@@ -139,6 +139,14 @@ jobs:
             fi
             touch "${REPO_DIR}/.db-ready"
 
+            WORD_COUNT="$(docker exec gialgiay-api node -e 'const {PrismaClient}=require("@prisma/client"); const p=new PrismaClient(); p.word.count().then((c)=>{process.stdout.write(String(c)); process.exit(0);})')"
+            echo "Dictionary words in database: ${WORD_COUNT}"
+            if [ "${WORD_COUNT:-0}" -lt 1000 ]; then
+              echo "Loading full dictionary"
+              docker exec gialgiay-api node prisma/seed.js
+              docker exec gialgiay-api node -e 'const {PrismaClient}=require("@prisma/client"); const p=new PrismaClient(); Promise.all([p.word.count(), p.phrase.count(), p.word.groupBy({by:["source"]})]).then(([w,ph,s])=>{console.log("words",w,"phrases",ph,"sources",s.map((x)=>x.source).join(",")); process.exit(0);})'
+            fi
+
             echo "Caddy -> API health:"
             docker exec "$CADDY_ID" wget -qO- http://gialgiay-api:4000/api/health || true
             echo

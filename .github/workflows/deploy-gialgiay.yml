@@ -77,9 +77,21 @@ jobs:
               echo "Created ${REPO_DIR}/.env"
             fi
 
+            set -a
+            # shellcheck disable=SC1091
+            . "${REPO_DIR}/.env"
+            set +a
             docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d --build
+            if docker compose -f docker-compose.prod.yml logs api 2>/dev/null | grep -q "P1000"; then
+              echo "Postgres password mismatch — recreating empty database volume"
+              docker compose -f docker-compose.prod.yml stop api postgres || true
+              docker rm -f gialgiay-api gialgiay-postgres || true
+              docker volume rm gialgiay_gialgiay_pg || true
+              docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d
+            fi
             docker compose -f docker-compose.prod.yml ps
             docker compose -f docker-compose.prod.yml logs --tail 80 api || true
             docker restart "$CADDY_ID"
-            sleep 3
+            sleep 5
+            docker logs "$CADDY_ID" --tail 40 || true
             docker exec "$CADDY_ID" caddy reload --config /etc/caddy/Caddyfile

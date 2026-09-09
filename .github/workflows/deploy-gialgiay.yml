@@ -46,7 +46,12 @@ jobs:
               exit 1
             fi
             FMT='{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}'
-            PROXY_NETWORK="$(docker inspect -f "$FMT" "$CADDY_ID" | awk 'NF { print; exit }')"
+            PROXY_NETWORK="$(docker inspect -f "$FMT" "$CADDY_ID" | awk '$0 != "bridge" && $0 != "host" && $0 != "none" && NF { print; exit }')"
+            if [ -z "$PROXY_NETWORK" ]; then
+              echo "Could not find Caddy docker network"
+              docker inspect "$CADDY_ID" --format '{{json .NetworkSettings.Networks}}'
+              exit 1
+            fi
             export PROXY_NETWORK
             echo "Using proxy network: $PROXY_NETWORK"
 
@@ -81,16 +86,71 @@ jobs:
             # shellcheck disable=SC1091
             . "${REPO_DIR}/.env"
             set +a
-            if [ ! -f "${REPO_DIR}/.db-ready" ]; then
-              echo "First database init — recreating Postgres volume"
+            if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+              echo "POSTGRES_PASSWORD missing in .env"
+              exit 1
+            fi
+
+            tmp_env="$(mktemp)"
+            awk -v pw="$POSTGRES_PASSWORD" '
+              BEGIN { done = 0 }
+              /^DATABASE_URL=/ {
+                print "DATABASE_URL=postgresql://gialgiay:" pw "@postgres:5432/gialgiay?schema=public"
+                done = 1
+                next
+              }
+              { print }
+              END {
+                if (!done) print "DATABASE_URL=postgresql://gialgiay:" pw "@postgres:5432/gialgiay?schema=public"
+              }
+            ' .env > "$tmp_env"
+            mv "$tmp_env" .env
+            set -a
+            # shellcheck disable=SC1091
+            . "${REPO_DIR}/.env"
+            set +a
+
+            api_healthy=1
+            if ! docker exec gialgiay-api node -e "require('http').get('http://127.0.0.1:4000/api/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" 2>/dev/null; then
+              api_healthy=0
+            fi
+            if docker logs --tail 100 gialgiay-api 2>/dev/null | grep -Eq 'P1000|Authentication failed against database server'; then
+              api_healthy=0
+            fi
+
+            if [ "$api_healthy" != "1" ]; then
+              echo "API is down or Postgres auth is wrong — recreating database volume"
               docker rm -f gialgiay-api gialgiay-postgres || true
               docker volume rm gialgiay_gialgiay_pg || true
-              touch "${REPO_DIR}/.db-ready"
+              rm -f "${REPO_DIR}/.db-ready"
             fi
+
             docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d --build
+            docker network connect "$PROXY_NETWORK" gialgiay-api || true
+            docker network connect "$PROXY_NETWORK" gialgiay-web || true
+
+            echo "Waiting for API health"
+            ready=0
+            for i in $(seq 1 60); do
+              if docker exec gialgiay-api node -e "require('http').get('http://127.0.0.1:4000/api/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" 2>/dev/null; then
+                ready=1
+                echo "API healthy after ${i} checks"
+                break
+              fi
+              echo "API not ready ($i/60)"
+              docker compose -f docker-compose.prod.yml logs --tail 20 api || true
+              sleep 5
+            done
             docker compose -f docker-compose.prod.yml ps
-            docker compose -f docker-compose.prod.yml logs --tail 40 api || true
-            docker restart "$CADDY_ID"
-            sleep 8
-            docker logs "$CADDY_ID" --tail 30 || true
+            if [ "$ready" != "1" ]; then
+              echo "API failed to become healthy"
+              docker compose -f docker-compose.prod.yml logs --tail 120 api || true
+              docker inspect gialgiay-api --format '{{json .NetworkSettings.Networks}}' || true
+              exit 1
+            fi
+            touch "${REPO_DIR}/.db-ready"
+
+            echo "Caddy -> API health:"
+            docker exec "$CADDY_ID" wget -qO- http://gialgiay-api:4000/api/health || true
+            echo
             docker exec "$CADDY_ID" caddy reload --config /etc/caddy/Caddyfile || true

@@ -23,3 +23,28 @@ woason.ru {
 	try_files {path} /index.html
 	file_server
 }
+
+www.gialgiay.ru {
+	redir https://gialgiay.ru{uri} permanent
+}
+
+gialgiay.ru {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	handle /api* {
+		reverse_proxy gialgiay-api:4000
+	}
+	handle /docs* {
+		reverse_proxy gialgiay-api:4000
+	}
+	handle /uploads* {
+		reverse_proxy gialgiay-api:4000
+	}
+	handle {
+		reverse_proxy gialgiay-web:3000
+	}
+}

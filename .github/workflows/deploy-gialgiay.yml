@@ -80,4 +80,6 @@ jobs:
             docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d --build
             docker compose -f docker-compose.prod.yml ps
             docker compose -f docker-compose.prod.yml logs --tail 80 api || true
-            docker exec "$CADDY_ID" caddy reload --config /etc/caddy/Caddyfile || true
+            docker restart "$CADDY_ID"
+            sleep 3
+            docker exec "$CADDY_ID" caddy reload --config /etc/caddy/Caddyfile

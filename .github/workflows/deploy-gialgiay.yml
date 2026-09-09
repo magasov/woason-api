@@ -61,8 +61,8 @@ jobs:
               umask 077
               printf '%s\n' \
                 "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
-                "DATABASE_URL=postgresql://gialgiay:${POSTGRES_PASSWORD}@postgres:5432/gialgiay?schema=public" \
-                "REDIS_URL=redis://redis:6379" \
+                "DATABASE_URL=postgresql://gialgiay:${POSTGRES_PASSWORD}@gialgiay-postgres:5432/gialgiay?schema=public" \
+                "REDIS_URL=redis://gialgiay-redis:6379" \
                 "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}" \
                 "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" \
                 "JWT_ACCESS_EXPIRES=15m" \
@@ -90,8 +90,9 @@ jobs:
               exit 1
             fi
 
-            grep -v '^DATABASE_URL=' .env > .env.tmp || true
-            printf 'DATABASE_URL=postgresql://gialgiay:%s@postgres:5432/gialgiay?schema=public\n' "$POSTGRES_PASSWORD" >> .env.tmp
+            grep -vE '^(DATABASE_URL|REDIS_URL)=' .env > .env.tmp || true
+            printf 'DATABASE_URL=postgresql://gialgiay:%s@gialgiay-postgres:5432/gialgiay?schema=public\n' "$POSTGRES_PASSWORD" >> .env.tmp
+            printf 'REDIS_URL=redis://gialgiay-redis:6379\n' >> .env.tmp
             mv .env.tmp .env
             set -a
             # shellcheck disable=SC1091

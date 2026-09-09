@@ -13,12 +13,13 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           GIALGIAY_DEPLOY_KEY: ${{ secrets.GIALGIAY_DEPLOY_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 45m
-          envs: GIALGIAY_DEPLOY_KEY
+          envs: GIALGIAY_DEPLOY_KEY,DEEPSEEK_API_KEY
           script: |
             set -euo pipefail
             REPO_DIR=/opt/gialgiay
@@ -35,6 +36,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             rm -f "$KEY_FILE"
+            echo "Repo SHA: $(git rev-parse --short HEAD)"
+            echo "Prompt file: $(grep -c 'Платформ кхеллар' backend/src/ai/system-prompt.ts || true) matches"
+            DEPLOY_DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
 
             CADDY_ID="$(docker ps --filter ancestor=caddy:2-alpine -q | head -n 1)"
             if [ -z "$CADDY_ID" ]; then
@@ -90,14 +94,24 @@ jobs:
               exit 1
             fi
 
-            grep -vE '^(DATABASE_URL|REDIS_URL)=' .env > .env.tmp || true
+            grep -vE '^(DATABASE_URL|REDIS_URL|DEEPSEEK_API_KEY|DEEPSEEK_API_URL|DEEPSEEK_MODEL|SYSTEM_PROMPT)=' .env > .env.tmp || true
             printf 'DATABASE_URL=postgresql://gialgiay:%s@gialgiay-postgres:5432/gialgiay?schema=public\n' "$POSTGRES_PASSWORD" >> .env.tmp
             printf 'REDIS_URL=redis://gialgiay-redis:6379\n' >> .env.tmp
+            printf 'DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions\n' >> .env.tmp
+            printf 'DEEPSEEK_MODEL=deepseek-chat\n' >> .env.tmp
+            printf 'SYSTEM_PROMPT=\n' >> .env.tmp
+            if [ -z "${DEPLOY_DEEPSEEK_API_KEY:-}" ]; then
+              echo "DEEPSEEK_API_KEY secret is empty — chat would ignore the system prompt"
+              exit 1
+            fi
+            printf 'DEEPSEEK_API_KEY=%s\n' "$DEPLOY_DEEPSEEK_API_KEY" >> .env.tmp
             mv .env.tmp .env
             set -a
             # shellcheck disable=SC1091
             . "${REPO_DIR}/.env"
             set +a
+            echo "DEEPSEEK_API_KEY in .env: ${#DEEPSEEK_API_KEY} chars"
+            echo "SYSTEM_PROMPT in .env: ${#SYSTEM_PROMPT} chars (must be 0 so code prompt is used)"
 
             api_healthy=1
             if ! docker exec gialgiay-api node -e "require('http').get('http://127.0.0.1:4000/api/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" 2>/dev/null; then
@@ -114,7 +128,8 @@ jobs:
               rm -f "${REPO_DIR}/.db-ready"
             fi
 
-            docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d --build
+            docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" build --no-cache api
+            docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d --build --force-recreate api web
             docker network connect "$PROXY_NETWORK" gialgiay-api || true
             docker network connect "$PROXY_NETWORK" gialgiay-web || true
 
@@ -147,6 +162,8 @@ jobs:
               docker exec gialgiay-api node -e 'const {PrismaClient}=require("@prisma/client"); const p=new PrismaClient(); Promise.all([p.word.count(), p.phrase.count(), p.word.groupBy({by:["source"]})]).then(([w,ph,s])=>{console.log("words",w,"phrases",ph,"sources",s.map((x)=>x.source).join(",")); process.exit(0);})'
             fi
 
+            echo "Compiled prompt in API image:"
+            docker exec gialgiay-api node -e 'const fs=require("fs"); for (const f of ["dist/ai/system-prompt.js","dist/src/ai/system-prompt.js"]) { try { const t=fs.readFileSync(f,"utf8"); console.log(f, "platform", t.includes("Платформ кхеллар"), "uncertain", t.includes("<uncertain>"), "len", t.length); } catch(e) { console.log(f, "missing"); } } console.log("container DEEPSEEK_API_KEY", Boolean(process.env.DEEPSEEK_API_KEY), (process.env.DEEPSEEK_API_KEY||"").length); console.log("container SYSTEM_PROMPT len", (process.env.SYSTEM_PROMPT||"").trim().length);'
             echo "Caddy -> API health:"
             docker exec "$CADDY_ID" wget -qO- http://gialgiay-api:4000/api/health || true
             echo

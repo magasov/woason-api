@@ -1,0 +1,81 @@
+name: Deploy gialgiay
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [deploy-gialgiay]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and restart gialgiay on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GIALGIAY_DEPLOY_KEY: ${{ secrets.GIALGIAY_DEPLOY_KEY }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GIALGIAY_DEPLOY_KEY
+          script_stop: true
+          script: |
+            set -euo pipefail
+            REPO_DIR=/opt/gialgiay
+            KEY_FILE=/tmp/gialgiay-github
+            printf '%s\n' "$GIALGIAY_DEPLOY_KEY" > "$KEY_FILE"
+            chmod 600 "$KEY_FILE"
+            export GIT_SSH_COMMAND="ssh -i $KEY_FILE -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              mkdir -p "$REPO_DIR"
+              git clone --branch main git@github.com:magasov/gialgiay-ai.git "$REPO_DIR"
+            fi
+            cd "$REPO_DIR"
+            git fetch origin main
+            git reset --hard origin/main
+            rm -f "$KEY_FILE"
+
+            CADDY_ID="$(docker ps --filter ancestor=caddy:2-alpine -q | head -n 1)"
+            if [ -z "$CADDY_ID" ]; then
+              CADDY_ID="$(docker ps --format '{{.ID}} {{.Names}}' | awk 'tolower($0) ~ /caddy/ {print $1; exit}')"
+            fi
+            if [ -z "$CADDY_ID" ]; then
+              echo "WOAson Caddy container not found"
+              exit 1
+            fi
+            FMT='{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}'
+            PROXY_NETWORK="$(docker inspect -f "$FMT" "$CADDY_ID" | awk 'NF { print; exit }')"
+            export PROXY_NETWORK
+            echo "Using proxy network: $PROXY_NETWORK"
+
+            if [ ! -f .env ]; then
+              POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+              JWT_ACCESS_SECRET="$(openssl rand -hex 32)"
+              JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
+              umask 077
+              printf '%s\n' \
+                "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
+                "DATABASE_URL=postgresql://gialgiay:${POSTGRES_PASSWORD}@postgres:5432/gialgiay?schema=public" \
+                "REDIS_URL=redis://redis:6379" \
+                "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}" \
+                "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" \
+                "JWT_ACCESS_EXPIRES=15m" \
+                "JWT_REFRESH_EXPIRES=7d" \
+                "PORT=4000" \
+                "FRONTEND_URL=https://gialgiay.ru,https://www.gialgiay.ru" \
+                "PUBLIC_API_URL=https://gialgiay.ru" \
+                "DEEPSEEK_API_KEY=" \
+                "DEEPSEEK_API_URL=https://api.deepseek.com/v1/chat/completions" \
+                "DEEPSEEK_MODEL=deepseek-chat" \
+                "SYSTEM_PROMPT=" \
+                "ADMIN_EMAIL=77aushev@mail.ru" \
+                "ADMIN_PASSWORD=" \
+                "NEXT_PUBLIC_API_URL=https://gialgiay.ru/api" \
+                > .env
+              echo "Created ${REPO_DIR}/.env"
+            fi
+
+            docker compose -f docker-compose.prod.yml --env-file "${REPO_DIR}/.env" up -d --build
+            docker compose -f docker-compose.prod.yml ps
+            docker exec "$CADDY_ID" caddy reload --config /etc/caddy/Caddyfile || true

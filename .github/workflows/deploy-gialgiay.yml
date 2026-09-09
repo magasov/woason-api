@@ -17,6 +17,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 45m
           envs: GIALGIAY_DEPLOY_KEY
           script_stop: true
           script: |
